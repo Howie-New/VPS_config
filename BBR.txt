@@ -1,0 +1,24 @@
+cat <<'EOF' | sudo tee /etc/sysctl.d/99-bbr.conf
+# 使用 fq 队列调度器以配合 BBR
+net.core.default_qdisc=fq
+# 将拥塞控制算法切换为 BBR
+net.ipv4.tcp_congestion_control=bbr
+EOF
+
+# 立刻生效（无需重启）
+sudo sysctl --system
+
+验证是否成功
+# 看当前拥塞控制是否是 bbr
+sysctl net.ipv4.tcp_congestion_control
+# 应显示：net.ipv4.tcp_congestion_control = bbr
+
+# 查看可用算法里是否包含 bbr
+sysctl net.ipv4.tcp_available_congestion_control
+
+# 确认模块已加载
+lsmod | grep bbr
+# 看到 tcp_bbr 的行即可
+
+
+说明：BBR 是 TCP 拥塞控制算法，对 IPv4/IPv6 都生效；fq 作为默认 qdisc 能让 BBR 更好地调度队列。
