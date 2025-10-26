@@ -1,0 +1,100 @@
+安装xui
+bash <(curl -Ls https://raw.githubusercontent.com/vaxilu/x-ui/master/install.sh)
+
+随后需要设置用户名, 密码, 端口
+XUI_ACCOUNT=""
+XUI_PASSWORD=""
+XUI_PORT=""
+
+
+最后需要设置一个子域名以https的方式用来登录操作
+XUI_DOMAIN="pre.example.com" 
+
+# 写一个仅 80 的最小站点（如果你已经有，就跳过）
+cat >/etc/nginx/sites-available/${XUI_DOMAIN}.http.conf <<'EOF'
+server {
+  listen 80;
+  listen [::]:80;
+  server_name PREFIX_DOMAIN_PLACEHOLDER;
+  root /var/www/PREFIX_DOMAIN_PLACEHOLDER;  # 可以不存在，签发不用它
+}
+EOF
+
+sed -i "s|PREFIX_DOMAIN_PLACEHOLDER|${XUI_DOMAIN}|g" /etc/nginx/sites-available/${XUI_DOMAIN}.conf
+
+
+ln -sf /etc/nginx/sites-available/XUI_DOMAIN.http.conf /etc/nginx/sites-enabled/xui-ctrl.howiecode.xyz.conf
+nginx -t && systemctl reload nginx
+
+目的：确保 nginx -t 成功，这样 acme.sh 的 --nginx 模式才能接管并注入校验 location。
+
+确保解析到当前机器（Cloudflare 请先“灰云 / DNS only”）：
+dig +short XUI_DOMAIN A
+dig +short XUI_DOMAIN AAAA
+
+# 给子域单独签发并安装证书（acme.sh）
+# 签发（Let’s Encrypt，ECDSA-256）
+acme.sh --issue -d "$XUI_DOMAIN" --nginx -k ec-256 --debug 2
+
+# 安装到系统路径，并配置续期后自动 reload Nginx
+acme.sh --install-cert -d "$XUI_DOMAIN" \
+  --key-file       /etc/ssl/private/${XUI_DOMAIN}.key \
+  --fullchain-file /etc/ssl/certs/${XUI_DOMAIN}.fullchain.pem \
+  --reloadcmd     "systemctl reload nginx"
+
+快速确认文件 确实是证书：
+
+grep -m1 "BEGIN CERTIFICATE" /etc/ssl/certs/xui-ctrl.howiecode.xyz.fullchain.pem
+openssl x509 -in /etc/ssl/certs/xui-ctrl.howiecode.xyz.fullchain.pem -noout -subject -issuer
+
+
+能看到 BEGIN CERTIFICATE 和正常的 subject/issuer 就对了。
+
+现在写入正确的https的子域名nginx conf
+cat >/etc/nginx/sites-available/${XUI_DOMAIN}.conf <<'EOF'
+map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+
+server {
+  listen 443 ssl http2;
+  listen [::]:443 ssl http2;
+  server_name PREFIX_DOMAIN_PLACEHOLDER;
+
+  ssl_certificate     /etc/ssl/certs/PREFIX_DOMAIN_PLACEHOLDER.fullchain.pem;
+  ssl_certificate_key /etc/ssl/private/PREFIX_DOMAIN_PLACEHOLDER.key;
+
+  # 反向代理到 x-ui 面板本地端口
+  location / {
+    proxy_pass http://127.0.0.1:PORT_PLACEHOLDER;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # WebSocket/升级类连接（面板需要时能正常升级）
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        $connection_upgrade;
+
+    proxy_read_timeout 300;
+    proxy_send_timeout 300;
+    proxy_redirect off;
+  }
+}
+
+server {
+  listen 80;
+  listen [::]:80;
+  server_name PREFIX_DOMAIN_PLACEHOLDER;
+  return 301 https://$host$request_uri;
+}
+EOF
+
+sed -i "s|PREFIX_DOMAIN_PLACEHOLDER|${XUI_DOMAIN}|g" /etc/nginx/sites-available/${XUI_DOMAIN}.conf
+sed -i "s|PORT_PLACEHOLDER|${XUI_PORT}|g" /etc/nginx/sites-available/${XUI_DOMAIN}.conf
+
+
+ln -sf /etc/nginx/sites-available/${XUI_DOMAIN}.conf /etc/nginx/sites-enabled/${XUI_DOMAIN}.conf
+nginx -t && systemctl reload nginx
+
+确认无误后可以把一开始的/etc/nginx/sites-available/${XUI_DOMAIN}.http.conf 删除
+rm /etc/nginx/sites-available/${XUI_DOMAIN}.http.conf 
