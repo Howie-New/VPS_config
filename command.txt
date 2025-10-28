@@ -17,7 +17,8 @@ systemctl restart nginx
 
 systemctl status nginx
 
-DOMAIN="example.com"         # 换成你的主域
+# 换成你的主域
+DOMAIN="example.com"        
 # 这是linux官方推荐的webroot 目录
 WEBROOT="/var/www/${DOMAIN}"
 
@@ -78,7 +79,7 @@ acme.sh --issue -d "$DOMAIN" --nginx -k ec-256
 
 把证书安装（复制/链接）到系统常用路径，并在续期后自动重载 Nginx：
 
-acme.sh --install-cert -d "$DOMAIN" \
+acme.sh --install-cert -d "${DOMAIN}" \
   --key-file       /etc/ssl/private/${DOMAIN}.key \
   --fullchain-file /etc/ssl/certs/${DOMAIN}.fullchain.pem \
   --reloadcmd     "systemctl reload nginx"
